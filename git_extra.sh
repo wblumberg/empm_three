@@ -1,9 +1,0 @@
-git add src/count_lines.f90
-git add src/netcdf_write.f90
-git add src/interp.h
-git add src/netcdf_prep3.f90
-git add src/intspline.f90
-git add src/netcdf_check.f90
-git add src/netcdf_prep.f90
-git add src/netcdf_write3.f90
-git add src/splinepoints.input
