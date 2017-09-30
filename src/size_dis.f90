@@ -16,7 +16,7 @@
 !
 ! -------------------------------------------------------------------------------------------------
 ! -------------------------------------------------------------------------------------------------
-        SUBROUTINE size_dis(N_i,qc_i,radius_drop,con_drop,mass_drop,volume,m_i,ne)
+        SUBROUTINE size_dis(N_i,qc_i,rho,radius_drop,con_drop,mass_drop,volume,m_i,ne)
 
         USE const
 
@@ -24,7 +24,7 @@
 
         INTEGER :: n
         INTEGER :: ne
-        REAL*8  :: N_i, volume
+        REAL*8  :: N_i, volume, rho
         REAL*8  :: qc_i, m_i
 
         REAL*8  :: mu, lambda
@@ -38,7 +38,7 @@
         REAL*8  :: gamma1, gamma4, igamma1
 
         WRITE(7,*) ''
-	WRITE(7,*) '---------------------------------------------------------------------------'
+        WRITE(7,*) '---------------------------------------------------------------------------'
         WRITE(7,*) 'size_dis.f90: (calculation of size distribution using gamma function)'
 
         const1  = pi*rho_w/6.0
@@ -46,7 +46,14 @@
         iconst2 = 1.0/const2
 
 ! -- Calculate shape paremeter of the gamma function
-        mu = MIN(15.,1000.E6/N_i+2)
+! -- Morrison and Gettelman,, 2008
+        mu = 0.0005714*N_i+0.2714
+        mu = 1./(mu**2.)-1.
+        mu = MAX(mu,2.)
+        mu = MIN(mu,10.)      
+
+! -- Thompson et al, 2008
+        !mu = MIN(15.,1000.E6/N_i+2)
 
         WRITE(7,*) 'mu     = ', mu
 
@@ -56,7 +63,7 @@
         igamma1 = 1.0/gamma1
 
 ! -- Calculate distribution's slope
-        lambda = 1.0D-6*(N_i*const1*gamma4*igamma1/qc_i)**iconst2
+        lambda = 1.0D-6*(N_i*rho*const1*gamma4*igamma1/qc_i)**iconst2
 
         WRITE(7,*) 'lambda = ', lambda
 

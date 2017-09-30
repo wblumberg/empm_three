@@ -58,7 +58,7 @@
         INTEGER :: i, ipe, mip, mr, nbin
         REAL*8  :: STATave(mip,101), STATint(mip,101)
 
-        DO i=1,nbin+1
+        DO i=1,nbin!+1
            STATave(ipe,i) = STATave(ipe,i)*(mr-1)/mr+(STATint(ipe,i)/mr)
         END DO
 

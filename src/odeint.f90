@@ -47,7 +47,7 @@
         IF (kmax .GT. 0) xsav=x-2.*dxsav
 
         DO nstp=1,maxstp
-           CALL fcnkb(x,y,dydx)
+           CALL fcnkb(y,dydx)
            DO i=1,nvar
               yscal(i) = ABS(y(i))+ABS(h*dydx(i))+TINY
            END DO

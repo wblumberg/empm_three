@@ -18,8 +18,9 @@
 
         REAL*8 FUNCTION FINTRP ( MODE, X, X1, F1, X2, F2 )
 
-	REAL*8 :: F1, F2, X, X1, X2
+	REAL*8 :: F, F1, F2, X, X1, X2
 
+        INTEGER :: MODE
 ! -- 1     linear       -- A * X + B
 ! -- 2     exponential  -- A * EXP( B * X )
 ! -- 3     power law    -- A * X**B

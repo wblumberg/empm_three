@@ -33,7 +33,7 @@
         INTEGER   :: ipe, j, k, m1, m4, mip, scalar_pdf_nbin, nbin
         INTEGER*4 :: igrid
         REAL*8    :: ddx, pNlength, pNmax, pNmin, PDFAREA
-        REAL*8    :: A(0:igrid), PDF(mip,101), SCALAR(101)
+        REAL*8    :: A(0:igrid), PDF(mip,100), SCALAR(100)
 
         nbin = scalar_pdf_nbin
 

@@ -16,17 +16,18 @@
 ! -------------------------------------------------------------------------------------------------
 ! -------------------------------------------------------------------------------------------------
 
-        SUBROUTINE fcnkb(t,drop_radius,drdt)
+        SUBROUTINE fcnkb(drop_radius,drdt)
 
         USE const
         USE array
+        USE intspline
 
         IMPLICIT NONE
 
         REAL*8  :: drop_radius(8), drdt(8)
         REAL*8  :: ck, cr, denom
         REAL*8  :: e, es, ew
-        REAL*8  :: falpha, fbeta, rho, rhol, sw, t
+        REAL*8  :: falpha, fbeta, rho, rhol
 
 ! -- molecular weight of the solute (NaCl, (NH4)2SO4, ...)
         REAL*8  :: Ms
@@ -82,13 +83,23 @@
 
         falpha  = radius/(radius+lalpha)
         fbeta   = radius/(radius+lbeta)
-        rhol    = (radius**3*pi43*rho_w+solute_mass*c7)/(radius**3*pi43) 
+        
+! -- check to see whether droplet is smaller than 0.2 micro meter, has a radius less than the
+! -- critical radius and the saturation is less than a critical value, than get the equilibrium 
+! -- radius using the interpolator
+        !IF (radius .LT. 2.e-7 .AND. radius .LT. splinearray(1,2,npoints) &
+        !    .AND. (1+s) .LT. splinearray(1,1,npoints) ) THEN
+        !   CALL psplint(1,1+s,radius)
+        !   drdt(1) = 0.0
+        !ELSE
+           rhol    = (radius**3*pi43*rho_w+solute_mass*c7)/(radius**3*pi43) 
 
 ! -- calculate drdt
-        ck      = (2*sigma/(Rv*temp*rhol*radius)) 
-        cr      = (Mw/Ms)*solute_mass/(pi43*radius**3*rhol-solute_mass) 
-        denom   = rhol*(Rv*temp/(fbeta*D*es)+Lv**2/(falpha*Ktemp*Rv*temp**2))
-        drdt(1) = 1.0/radius*(s-ck+cr)/denom
+           ck      = (2*sigma/(Rv*temp*rhol*radius)) 
+           cr      = (Mw/Ms)*solute_mass/(pi43*radius**3*rhol-solute_mass) 
+           denom   = rhol*(Rv*temp/(fbeta*D*es)+Lv**2/(falpha*Ktemp*Rv*temp**2))
+           drdt(1) = 1.0/radius*(s-ck+cr)/denom
+        !END IF
 
 ! -- calculate change of water vapor
         drdt(2) = -pi4*grid_scale*radius**2*drdt(1)*rho_w 

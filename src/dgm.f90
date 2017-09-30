@@ -15,7 +15,7 @@
 ! -------------------------------------------------------------------------------------------------
 ! -------------------------------------------------------------------------------------------------
 
-        SUBROUTINE DGM(radius,qv,temp,SuS,press,ver_vel,height,ql,weight,i_grid_vol,t_use,ite,iteration1,ncat)
+        SUBROUTINE DGM(radius,qv,temp,SuS,press,ver_vel,height,ql,weight,i_grid_vol,t_use,ite,ncat)
      
 ! --    array drop_radius:  1--ndmax contain the radii of each droplet category
 !     
@@ -34,7 +34,7 @@
 
         EXTERNAL fcnkb,rkqs    
  
-        INTEGER :: ite, iteration1
+        INTEGER :: ite
 ! -- aerosol category (ncat)
         INTEGER :: nbad, ncat, nok
 
@@ -42,8 +42,8 @@
         REAL*8  :: height, press, SuS, ver_vel
         REAL*8  :: epserr, es, ew, h1, hmin
         REAL*8  :: ql, qs, qv 
-        REAL*8  :: radius 
-        REAL*8  :: sd, sout, SS, t1, t2
+        REAL*8  :: radius
+        REAL*8  :: SS, t1, t2
         REAL*8  :: temp, t_use 
         REAL*8  :: weight
 

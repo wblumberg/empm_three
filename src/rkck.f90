@@ -15,14 +15,14 @@
 ! -------------------------------------------------------------------------------------------------
 ! -------------------------------------------------------------------------------------------------
 
-        SUBROUTINE rkck(y,dydx,n,x,h,yout,yerr,derivs)
+        SUBROUTINE rkck(y,dydx,n,h,yout,yerr,derivs)
 
         USE array
 
         IMPLICIT NONE
 
         INTEGER       :: i, n
-        REAL*8        :: dydx(n), h, x, y(n), yerr(n), yout(n)
+        REAL*8        :: dydx(n), h, y(n), yerr(n), yout(n)
 
         EXTERNAL derivs
 
@@ -42,31 +42,31 @@
            ytemp(i) = y(i)+B21*h*dydx(i)
         END DO
 
-        CALL derivs(x+A2*h,ytemp,ak2)
+        CALL derivs(ytemp,ak2) !x+A2*h,
 
         DO i=1,n
            ytemp(i) = y(i)+h*(B31*dydx(i)+B32*ak2(i))
         END DO
 
-        CALL derivs(x+A3*h,ytemp,ak3)
+        CALL derivs(ytemp,ak3) !x+A3*h,
 
         DO i=1,n
            ytemp(i) = y(i)+h*(B41*dydx(i)+B42*ak2(i)+B43*ak3(i))
         END DO
 
-        CALL derivs(x+A4*h,ytemp,ak4)
+        CALL derivs(ytemp,ak4) !x+A4*h,
 
         DO i=1,n
            ytemp(i) = y(i)+h*(B51*dydx(i)+B52*ak2(i)+B53*ak3(i)+B54*ak4(i))
         END DO
 
-        CALL derivs(x+A5*h,ytemp,ak5)
+        CALL derivs(ytemp,ak5) !x+A5*h,
 
         DO i=1,n
            ytemp(i) = y(i)+h*(B61*dydx(i)+B62*ak2(i)+B63*ak3(i)+B64*ak4(i)+B65*ak5(i))
         END DO
 
-        CALL derivs(x+A6*h,ytemp,ak6)
+        CALL derivs(ytemp,ak6) !x+A6*h,
 
         DO i=1,n
            yout(i)  = y(i)+h*(C1*dydx(i)+C3*ak3(i)+C4*ak4(i)+C6*ak6(i))

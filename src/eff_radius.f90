@@ -15,7 +15,7 @@
 
         IMPLICIT NONE
 
-        INTEGER :: i, j, nbin, n_drop
+        INTEGER :: i, nbin, n_drop
         REAL*8  :: numerator, denominator
         REAL*8  :: r2_mean(nbin), r3_mean(nbin), pdf(nbin)
         REAL*8  :: r_eff

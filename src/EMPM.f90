@@ -1,4 +1,4 @@
-        PROGRAM EMPM
+                PROGRAM EMPM
 
 ! -------------------------------------------------------------------------------------------------
 ! -------------------------------------------------------------------------------------------------
@@ -6,18 +6,45 @@
 ! EMPM - Explicit Mixing Parcel Model:
 ! ------------------------------------
 !
-! ' The EMPM [...] predicts the evolving in-cloud variability of temperature and water vapor mixing
+! 'The EMPM [...] predicts the evolving in-cloud variability of temperature and water vapor mixing
 ! ratio due to entrainment and finite-rate turbulent mixing using 1D representation of a rising 
 ! cloudy parcel.' (Krueger, 2008)
 !
 !
 ! Authors:     Steven Krueger, Phil Austin, Sonja Drueke
 !
-! Date:        AUGUST 2016
+! Date:        SEPTEMBER 2017
 !
 !
 ! Updates:
 ! --------
+! Sep 28th, 2017
+! -- Include temptime and qvtime array in netCDF output file when netCDF flag is chosen
+! -- Include spline interpolation for small droplet radii (contains still a bug)
+!
+! Sep 21st, 2017
+! -- Fix all compiler (ifort) warnings and errors (such as undeclared, undefind or unused variables)
+!
+! Sep 19th, 2017
+! -- Allow netCDF output for rtime and xtime variables (possible extension to other variables?)
+!
+! Aug 23rd, 2017
+! -- Allow unformatted FORTRAN file format for rtime.dat and xtime.dat
+! 
+! July 26th, 2017
+! -- Increase array size for writing out individual droplet data (m_index)
+!
+! July 25th, 2017
+! -- Include threshold value (read from namelist) for vertical velocity at which EMPM is stopped
+!
+! July 24th, 2017
+! -- Modify index.f90 to accommodate to new length of incloud vertical velocity profile
+!
+! July 18th, 2017
+! -- Length of incloud vertical velocity is now independent of the environment profile length
+! -- When end of incloud vertical velocity is reached, EMPM is stopped.
+! -- Correct the units of the molar weight of water (from g/mol to kg/mol)
+!
 ! August 12th, 2016
 ! -- implementing calculation of LWP
 ! -- including calculation for effective radius
@@ -89,6 +116,8 @@
 ! -------------------------------------------------------------------------------------------------
 
         USE const
+        USE intspline
+        USE netcdf
 
         IMPLICIT NONE
 
@@ -163,13 +192,13 @@
 ! -- array size for writing out data (has to agree with end_t / t_interval - set in namelist - mip)
         INTEGER   :: hist_array
         REAL*8    :: t_interval
-	INTEGER   :: mip
+        INTEGER   :: mip
 
 ! -- running index (iteration)
 ! -- start and end iteration index (iteration_s and iteration_e, respectively)
 ! -- index for calculating statistics (iteration1), maximal number of iteration (iteration2)
 ! -- index for writing out history data for t_interval (iteration3)
-	INTEGER   :: iteration, iteration_s, iteration_e
+        INTEGER   :: iteration, iteration_s, iteration_e
         INTEGER   :: iteration1, iteration2, iteration3
 
 ! -- current number of iteration periods in one realization (ip),
@@ -183,7 +212,7 @@
 ! -- molecular (dm), temperature (dtemp) and turbulent (dtur) diffusivity
 ! -- dissipation rate of turbulent kinetic energy
 	REAL*8, DIMENSION(2) :: dA
-        REAL*8    :: dm, dtemp, dtur
+        REAL*8    :: dm=0, dtemp=0, dtur=0
         REAL*8    :: epsilon
 ! -- Reynolds number (Re)
         REAL*8    :: Re
@@ -202,7 +231,8 @@
 ! -- flag for switching on/off constant vertical velocity (icw)
 ! -- flag for switching on/off incloud vertical velocity profile (ivp)
 ! -- flag for switching on/off cloud base entrainment (cb_ent) - namelist
-! -- flag for switching on/off stopping EMPM when a vertical velocity of zero is reached (icaw)
+! -- flag for switching on/off stopping EMPM when a vertical velocity smaller than threshold is 
+! -- reached (icaw)
 ! -- flag for entrainment at cloud base (first time step) (ent_flag) - code
 
         INTEGER   :: iim, iinm
@@ -223,8 +253,8 @@
 ! -- random seeds (iseed1, iseed2, ...)
 ! -- calculated random numbers (r1, r2)
         REAL*8    :: RAND1
-	INTEGER*4 :: iseed1, iseed2, iseed3
-	INTEGER*4 :: iseed4, iseed5, iseed6
+        INTEGER*4 :: iseed1, iseed2, iseed3
+        INTEGER*4 :: iseed4, iseed5, iseed6
         REAL*8    :: r1, r2
 
 !
@@ -267,10 +297,15 @@
 ! -- initial air density (rho_a) in kg/m^3, domain averaged air density (rho_avg) in kg/m^3
         REAL*8    :: rho_a, rho_avg
 ! -- vertical velocity inside the cloud (w_cloud), pressure level of the velocity information 
-! -- (p_cloud)
-        REAL*8, DIMENSION(:), ALLOCATABLE :: w_cloud, p_cloud
+! -- (p_cloud), height level of the velocity information (h_cloud)
+        REAL*8, DIMENSION(:), ALLOCATABLE :: w_cloud, p_cloud, h_cloud
+! -- profile length for incloud vertical velocity profile
+        INTEGER   :: nline_v
+        INTEGER   :: count_lines
 ! -- interpolated vertical velocity (vel) in the case the vertical velocity is read from file
-        REAL*8 :: vel
+        REAL*8    :: vel
+! -- threshold for vertical velocity at which EMPM is stopped (thsw)
+        REAL*8    :: thsw
 
 ! -- cloud top height (cloudtopheight - set in namelist) to end simulation
         REAL*8 :: cloudtopheight
@@ -316,7 +351,7 @@
 
 ! -- bin number for PDF (scalar_pdf_nbin), array size for scalars (set in namelist - igrid)
         INTEGER   :: scalar_pdf_nbin
-	INTEGER*4 :: igrid
+        INTEGER*4 :: igrid
 
 ! -- number of scalars (n_scalars)
 ! -- combining array for scalars (qlwater, qt, sl, buoy_ave, hm, SuS, qv and temp - scalar)
@@ -328,14 +363,15 @@
 ! -- scalar_rms_ave) of realizations
 ! -- probability density function for supersaturation (SuS_pdf)
 ! -- average pdf of supersaturation of realizations (SuS_pdf_ave)
-! -- 'bin values' for pdf of supersaturation (SuS_scalar)
+! -- 'bin values' for pdf of supersaturation (SuS_scalar), dummy variable necessary to call 
+! -- subroutine (dummy_SuS)
 ! -- min and max for pdf calculation of supersaturation (Sus_pdf_max and Sus_pdf_min, respectively)
         INTEGER   :: n_scalar = 8
         REAL*8, DIMENSION(:,:), ALLOCATABLE :: scalar
         REAL*8, DIMENSION(:,:), ALLOCATABLE :: scalar_mean, scalar_mean_ave
 	REAL*8, DIMENSION(:,:), ALLOCATABLE :: scalar_rms, scalar_rms_ave
 	REAL*8, DIMENSION(:,:), ALLOCATABLE :: SuS_pdf, SuS_pdf_ave
-        REAL*8, DIMENSION(:), ALLOCATABLE   :: SuS_scalar
+        REAL*8, DIMENSION(:), ALLOCATABLE   :: SuS_scalar, dummy_SuS
         REAL*8    :: Sus_pdf_max, Sus_pdf_min
 
 !
@@ -363,8 +399,8 @@
 ! -- number of activated droplets (n_act_drop), index array of all droplets (index_drop)
 ! -- number of droplets without entrained ccns (n_drop_used)
 ! -- total number of droplet categories (num_tot)
-	INTEGER   :: n_drop, n_drop_index, n_act_drop
-	INTEGER, DIMENSION(:), ALLOCATABLE :: index_drop
+        INTEGER   :: n_drop, n_drop_index, n_act_drop
+        INTEGER, DIMENSION(:), ALLOCATABLE :: index_drop
         INTEGER   :: n_drop_used
         INTEGER   :: num_tot
 
@@ -377,20 +413,24 @@
         INTEGER, DIMENSION(:), ALLOCATABLE   :: index
 	REAL*8, DIMENSION(:), ALLOCATABLE    :: dx_map
 
-! -- array to write out time series of total droplet number (t_index)
-	INTEGER, DIMENSION(:), ALLOCATABLE   :: t_index
-
 ! -- time series of droplet radius (r_time), time series of droplet position (x_time)
 ! -- control array to check that radius / position are 0 if there are no droplet (time_null)
 ! -- array size for writing out individual droplet data (m_index)
 ! -- time at which time series data of droplet radius and position are written out (t_time)
 ! -- index of time step to write out droplet radius' and positions (t_ip)
-	REAL*8, DIMENSION(:,:), ALLOCATABLE :: r_time
-        REAL*8, DIMENSION(:,:), ALLOCATABLE :: x_time
+	REAL*8, DIMENSION(:), ALLOCATABLE   :: r_time
+        REAL*8, DIMENSION(:), ALLOCATABLE   :: x_time
 	REAL*8, DIMENSION(:), ALLOCATABLE   :: time_null
-	INTEGER, PARAMETER                  :: m_index = 10000
-	REAL*8    :: t_time
-	INTEGER   :: t_ip
+        INTEGER   :: m_index
+!	REAL*8    :: t_time
+!        INTEGER   :: t_ip
+
+! -- auxiliary variables necessary to calculate lenght of individual droplet data
+! -- height difference between entrainment events (delta_ent), cloud depth (cloud_depth)
+! -- number of entrainment events (number_ent), expected droplet number entrained (n_drop_ent)
+! -- expected total number indices (tot_num_index) 
+        REAL*8    :: delta_ent, cloud_depth 
+        REAL*8    :: number_ent, n_drop_ent, tot_num_index
 
 ! -- array of mean droplet radius (r_mean), array of standard deviation of droplets (r_std)
 ! -- array of maximal droplet radius (r_max)
@@ -400,7 +440,7 @@
 ! -- sum of droplet radius (r_sum), index of maximal droplet radius (index_r_max)
 	REAL*8, DIMENSION(:), ALLOCATABLE  :: r_mean, r_std
 	REAL*8, DIMENSION(:), ALLOCATABLE  :: r_max
-	INTEGER, DIMENSION(:), ALLOCATABLE :: r_max_index, actndrop
+        INTEGER, DIMENSION(:), ALLOCATABLE :: r_max_index, actndrop
         REAL*8    :: r_max_drop, r_std_sum, r_sum
         INTEGER   :: index_r_max
 
@@ -453,10 +493,17 @@
 ! -- bin number for pdf (qt_pdf_nbin)
 	REAL*8, DIMENSION(:), ALLOCATABLE   :: qt_pdf, qt_scalar
 	REAL*8    :: qt_pdf_max, qt_pdf_min
-	INTEGER   :: qt_pdf_nbin
+        INTEGER   :: qt_pdf_nbin
 
 ! -- variables for calculating simulation time
-	INTEGER*4 :: time, time_start, time_end
+        INTEGER*4 :: time, time_start, time_end
+
+! -- switch to set the format for writing xtime.dat and rtime.dat
+        INTEGER*4 :: output_format
+
+! -- netCDF variables
+        INTEGER   :: ncid, varid_r, varid_x, varid_qv, varid_temp
+        REAL*8, DIMENSION(:), ALLOCATABLE  :: qv_out, temp_out
 
 ! -- info for the run
         CHARACTER*70 :: run_info
@@ -470,9 +517,14 @@
 ! -- input file paths (given in namelist)
 ! -- output path (given in namelist)
         CHARACTER(LEN=70) :: c_file, d_file, i_file, v_file
-        CHARACTER(LEN=20) :: i_profile_file, v_profile_file, drop_file, ccn_file
+        CHARACTER(LEN=30) :: i_profile_file, v_profile_file, drop_file, ccn_file
         CHARACTER(LEN=50) :: i_profile_path, v_profile_path, drop_path, ccn_path
         CHARACTER(LEN=50) :: output_path
+
+! -- file name for radii and position history data (r_filename and x_filename)
+        CHARACTER(LEN=100):: r_filename, x_filename
+! -- file name for netCDF file (n_filename)
+        CHARACTER(LEN=100):: n_filename
 
 ! -- characters to number output files for different realizations
         CHARACTER(LEN=4)  :: format_string
@@ -490,7 +542,7 @@
                           run_info,                               &
                           itd, ire, iim, idc, icw, ivp, icaw,     &
                           iinm, iccn, nccn, r_ccn, m_ccn,         &
-                          idp, m_i, N_i, r_i, LWC,                &
+                          idp, m_i, N_i, r_i, LWC, thsw,          &
                           qv, temp, press, w, height, cb_ent,     &
                           cloudtopheight,                         &
                           r_pdf_min, r_pdf_max, r_pdf_nbin,       &
@@ -502,7 +554,8 @@
                           start_t, end_t, t_interval, time_step,  &
                           mrealization
 
-        NAMELIST /io_file/ i_profile_file, i_profile_path,        &
+        NAMELIST /io_file/ output_format,                         &
+                           i_profile_file, i_profile_path,        &
                            v_profile_file, v_profile_path,        &
                            drop_file, drop_path,                  &
                            ccn_file, ccn_path,                    &
@@ -526,9 +579,9 @@
         iteration1 = t_interval/time_step
         iteration2 = end_t/time_step
         mip        = end_t/t_interval
-        igrid      = end_t/time_step
+        igrid      = 50000 !end_t/time_step
 
-	time_start = time()
+        time_start = time()
 
 ! -------------------------------------------------------------------------------------------------
 ! allocate arrays
@@ -541,7 +594,6 @@
         allocate( v(idimen) )
 
         allocate( p_array(mi), z_array(mi), qv_array(mi), temp_array(mi) )
-        allocate( p_cloud(mi), w_cloud(mi) )
 
         allocate( spoint(n_max), fpoint(n_max), m2(n_max), m3(n_max) )
 
@@ -561,7 +613,7 @@
 
         allocate( qt_pdf(qt_pdf_nbin), qt_scalar(qt_pdf_nbin) )
 
-        allocate( scalar(n_scalar,igrid) )
+        allocate( scalar(n_scalar,igrid), dummy_Sus(igrid) )
         allocate( scalar_mean(n_scalar,0:mip), scalar_mean_ave(n_scalar,0:mip) )
         allocate( scalar_rms(n_scalar,0:mip), scalar_rms_ave(n_scalar,0:mip) )
         allocate( SuS_pdf(mip,scalar_pdf_nbin), SuS_pdf_ave(mip,scalar_pdf_nbin) )
@@ -573,9 +625,6 @@
         allocate( r_std(mip), r_mean(mip) )
         allocate( s_std(mip), s_mean(mip) )
         allocate( r_max(mip), r_max_index(mip), actndrop(mip) )
-        allocate( t_index(mip) )
-        allocate( r_time(m_index,mip), x_time(m_index,mip) )
-        allocate( time_null(m_index), index_drop(m_index) )
 
         OPEN (UNIT=7,FILE='EMPM.log', FORM='FORMATTED')
 
@@ -598,9 +647,17 @@
         WRITE(7,*) 'bl      = ', bl
         WRITE(7,*) 'bl_inte = ', bl_inte
         WRITE(7,*) 'eta     = ', eta
-        WRITE(7,*) 'dtur    = ', dtur
-        WRITE(7,*) 'dm      = ', dm
-        WRITE(7,*) 'dtemp   = ', dtemp
+
+! -------------------------------------------------------------------------------------------------
+! read spline points from splinepoints.input, the data is then passed to fcnkb and psplint through 
+! intspline.f90
+! -------------------------------------------------------------------------------------------------
+
+        OPEN (51, file='splinepoints.input', access='sequential', status='old', form='formatted')
+
+        READ(51,*) (((splinearray(i,j,k),i=1,ncats),j=1,nvecs),k=1,npoints)
+
+        CLOSE (51)
 
 ! -------------------------------------------------------------------------------------------------
 ! read initial environmental profile from file
@@ -613,29 +670,33 @@
         WRITE(7,*) '  pressure        height          mixing ratio  temperature'
         WRITE(7,*) '   (hPa)           (m)             (kg/kg)       (K)'
 
-	OPEN (51,FILE=i_file)
+        OPEN (51,FILE=i_file)
 
         DO i = 1,mi
            READ(51,*) p_array(i), z_array(i), qv_array(i), temp_array(i)
            WRITE(7,'(4(3X,F12.6))') p_array(i), z_array(i), qv_array(i), temp_array(i)
- 	END DO
+        END DO
 
         CLOSE(51)
 
         IF (ivp .EQ. 1) THEN
+
            v_file = TRIM(v_profile_path)//TRIM(v_profile_file)
+           nline_v = count_lines(v_file)
+           allocate( p_cloud(nline_v), h_cloud(nline_v), w_cloud(nline_v) ) 
+
            WRITE(7,*) ''
            WRITE(7,*) 'reading incloud vertical velocity profile from file:'
            WRITE(7,*) v_file
            WRITE(7,*) '---------------------------------------------------------------------------'
-           WRITE(7,*) '  pressure        velocity'
-           WRITE(7,*) '   (hPa)           (m/s) '
-	   OPEN (52,FILE=v_file)
+           WRITE(7,*) '   pressure      height            velocity'
+           WRITE(7,*) '    (hPa)         (m)               (m/s) '
+           OPEN (52,FILE=v_file)
 
-           DO i = 1,mi
-              READ(52,*) p_cloud(i), w_cloud(i)
-              WRITE(7,'(2(3X,F12.6))')  p_cloud(i), w_cloud(i)
- 	   END DO
+           DO i = 1,nline_v
+              READ(52,*) p_cloud(i), h_cloud(i), w_cloud(i)
+              WRITE(7,'(3(3X,F12.6))')  p_cloud(i), h_cloud(i), w_cloud(i)
+           END DO
 
            CLOSE(52)
            w = w_cloud(1)
@@ -648,23 +709,24 @@
         WRITE(7,*) 'temp   = ', temp, '   ! temperature (K)'
         WRITE(7,*) 'press  = ', press, '   ! pressure (Pa)'
         WRITE(7,*) 'w      = ', w, '   ! cloud base vertical velocity (m/s)'
-        WRITE(7,*) 'height = ', height, '   ! height (m)'
+        WRITE(7,*) 'rho    = ', rho_a, '   ! cloud base air density (kg/m^3)'
+        WRITE(7,*) 'height = ', h_cloud(1), '   ! height (m)'
         WRITE(7,*) '---------------------------------------------------------------------------'
         WRITE(7,*) ''
 
 ! -- store initial pressure, temperature, height, velocity and water vapor mixing ratio
-	press0  = press
+        press0  = press
         temp0   = temp
-	height0 = height
+        height0 = height
         w0      = w
         qv0     = qv
 
 ! -- calculate the volume of the domain (the cross section size is set to roughly the Kolomogorov 
 ! -- scale)
-	volume  = 0.001*0.001*BL
+        volume  = 0.001*0.001*bl
 
 ! -- calculating Reynolds number (Re)
-        Re      = (BL_inte/eta)**(4.0/3.0)
+        Re      = (bl_inte/eta)**(4.0/3.0)
 
 ! -- set time to zero
         t       = 0.0
@@ -675,7 +737,7 @@
 ! -- (new fomula for slow mixing (big eta))
 !       ngrid = NINT(BL_inte/(eta/60.0))*(BL/BL_inte)
 
-        WRITE(7,*) 'ngrid = ', ngrid 
+        WRITE(7,*) 'ngrid = ', ngrid
 
 ! -- calculate the grid size
         dx      = (bl/FLOAT(ngrid))
@@ -691,11 +753,11 @@
         td      = (0.2*(dx**2.0)/dm)
 
         IF (itd .EQ. 1) THEN
-	   td = time_step
+           td = time_step
         END IF
 
         WRITE(7,*) 'just determined time step for diffusion:'
-	WRITE(7,*) 'td = ', td
+        WRITE(7,*) 'td = ', td
 
 ! -- calculate time step for turbulent convection (tc)
 ! -- Krueger (1993), 'Linear Eddy Modeling of Entrainment and Mixing in Stratus Clouds', (JAS)
@@ -711,23 +773,22 @@
 ! -- decide which time step to use
         IF (td .GE. tc) THEN
            mtrip  = INT(td/tc)
-	   idtrip = 1
-	   dt     = td
-	   WRITE(7,*) 'td is greater / equal to tc'
+           idtrip = 1
+           dt     = td
+           WRITE(7,*) 'td is greater / equal to tc'
         ELSE
            mtrip  = 1
-	   idtrip = INT(tc/td)+1
-	   dt     = tc/FLOAT(idtrip)
+           idtrip = INT(tc/td)+1
+           dt     = tc/FLOAT(idtrip)
            WRITE(7,*) 'td is smaller than tc, so let td = tc/idtrip'
         END IF
 
-	WRITE(7,*) 'td     = ', td
+        WRITE(7,*) 'td     = ', td
         WRITE(7,*) 'tc     = ', tc 
         WRITE(7,*) 'dt     = ', dt
         WRITE(7,*) 'dx     = ', dx
         WRITE(7,*) 'mtrip  = ', mtrip
-	WRITE(7,*) 'idtrip = ', idtrip
-
+        WRITE(7,*) 'idtrip = ', idtrip
 
 ! -- check whether the interval (t_interval) for writing out history data is n*dt where 
 ! -- n is an integer
@@ -773,6 +834,26 @@
 
         N_i = N_i*1.0E6
 
+! -- define length of r_time, x_time and other arrays
+        IF (iccn .EQ. 0) THEN
+           m_index = NINT(volume*N_i)
+        ELSE 
+           delta_ent     = (n_blob/ent_rate)*(psigma/(1.0-psigma))
+           cloud_depth   = h_cloud(nline_v)-h_cloud(1)
+
+           number_ent    = cloud_depth/delta_ent
+
+           n_drop_ent    = n_blob*psigma*bl*volume*N_i/bl
+           tot_num_index = number_ent*n_drop_ent
+
+           m_index = NINT((volume*N_i)+1.5*tot_num_index)
+        END IF
+
+        WRITE(7,*) 'length of array for droplet data = ', m_index
+
+        ALLOCATE( r_time(m_index), x_time(m_index) )
+        ALLOCATE( time_null(m_index), index_drop(m_index) )
+
 ! -------------------------------------------------------------------------------------------------
 ! Loop for the realization starts here, the number of realization is set in the namelist
 ! -------------------------------------------------------------------------------------------------
@@ -789,16 +870,28 @@
 
            WRITE(filenumber, format_string) mreal
 
+           allocate ( qv_out(ngrid), temp_out(ngrid) )
+
 ! -- files for the whole domain over time / each droplet over time
-	   OPEN(61,FILE=TRIM(output_path)//'rtime_'//TRIM(filenumber)//'.dat',FORM='formatted')
-           OPEN(62,FILE=TRIM(output_path)//'xtime_'//TRIM(filenumber)//'.dat',FORM='formatted')
-	   OPEN(63,FILE=TRIM(output_path)//'qvtime_'//TRIM(filenumber)//'.dat',FORM='formatted')
-	   OPEN(64,FILE=TRIM(output_path)//'temptime_'//TRIM(filenumber)//'.dat',FORM='formatted')
+           r_filename = TRIM(output_path)//'rtime_'//TRIM(filenumber)//'.dat'  
+           x_filename = TRIM(output_path)//'xtime_'//TRIM(filenumber)//'.dat'
+           IF (output_format .EQ. 1) THEN
+              OPEN(61,FILE=TRIM(r_filename),FORM='formatted')
+              OPEN(62,FILE=TRIM(x_filename),FORM='formatted')
+           ELSE IF (output_format .EQ. 2) THEN
+              OPEN(61,FORM='unformatted',FILE=TRIM(r_filename))
+              OPEN(62,FORM='unformatted',FILE=TRIM(x_filename))
+           ELSE IF (output_format .EQ. 3) THEN
+              n_filename = TRIM(output_path)//'EMPM_output_'//TRIM(filenumber)//'.nc'
+              CALL netcdf_prep(TRIM(n_filename),m_index,ngrid,mip,dt,dx,iteration1, &
+                               varid_r,varid_x,varid_qv,varid_temp,ncid)
+           END IF 
+           OPEN(63,FILE=TRIM(output_path)//'qvtime_'//TRIM(filenumber)//'.dat',FORM='formatted')
+           OPEN(64,FILE=TRIM(output_path)//'temptime_'//TRIM(filenumber)//'.dat',FORM='formatted')
 ! -- control files / interesting information
-	   OPEN(71,FILE=TRIM(output_path)//'qt_pdf_time_'//TRIM(filenumber)//'.dat',FORM='formatted')
-	   OPEN(72,FILE=TRIM(output_path)//'findex_'//TRIM(filenumber)//'.dat',FORM='formatted')
-           OPEN(73,FILE=TRIM(output_path)//'t_index_'//TRIM(filenumber)//'.dat',FORM='formatted')
- 	   OPEN(74,FILE=TRIM(output_path)//'entm_'//TRIM(filenumber)//'.dat',FORM = 'formatted')
+           OPEN(71,FILE=TRIM(output_path)//'qt_pdf_time_'//TRIM(filenumber)//'.dat',FORM='formatted')
+           OPEN(72,FILE=TRIM(output_path)//'findex_'//TRIM(filenumber)//'.dat',FORM='formatted')
+           OPEN(73,FILE=TRIM(output_path)//'entm_'//TRIM(filenumber)//'.dat',FORM = 'formatted')
 ! -- averaged droplet data
            OPEN(81,FILE=TRIM(output_path)//'r_mean_stats_'//TRIM(filenumber)//'.dat',FORM='formatted')
            OPEN(82,FILE=TRIM(output_path)//'r_mean_time_'//TRIM(filenumber)//'.dat',FORM='formatted')
@@ -806,8 +899,8 @@
            OPEN(84,FILE=TRIM(output_path)//'r3_mean_time_'//TRIM(filenumber)//'.dat',FORM='formatted')
            OPEN(85,FILE=TRIM(output_path)//'r_pdf_time_'//TRIM(filenumber)//'.dat',FORM='formatted')
            OPEN(86,FILE=TRIM(output_path)//'r_eff_time_'//TRIM(filenumber)//'.dat',FORM='formatted')
-	   OPEN(87,FILE=TRIM(output_path)//'super_mean_'//TRIM(filenumber)//'.dat',FORM='formatted')
-	   OPEN(88,FILE=TRIM(output_path)//'super_max_min_'//TRIM(filenumber)//'.dat',FORM='formatted')
+           OPEN(87,FILE=TRIM(output_path)//'super_mean_'//TRIM(filenumber)//'.dat',FORM='formatted')
+           OPEN(88,FILE=TRIM(output_path)//'super_max_min_'//TRIM(filenumber)//'.dat',FORM='formatted')
 
 ! -- domain average / average of all realizations
            OPEN(91,FILE=TRIM(output_path)//'ave_'//TRIM(filenumber)//'.dat',FORM = 'formatted')
@@ -818,7 +911,7 @@
            OPEN(96,FILE=TRIM(output_path)//'LWP_'//TRIM(filenumber)//'.dat',FORM='formatted')
 
            WRITE(7,*) '---------------------------------------------------------------------------'
-	   WRITE(7,*) 'mreal = ', mreal
+           WRITE(7,*) 'mreal = ', mreal
 
 ! -- create random number seed based on computer time
 ! -- be careful: time() is an intrinsic which is not fully portable! The values returned by this 
@@ -831,7 +924,7 @@
            iseed6 = time()+50000000
 
            WRITE(7,*) ''
-	   WRITE(7,*) 'random number seeds:'
+           WRITE(7,*) 'random number seeds:'
            WRITE(7,*) '---------------------------------------------------------------------------'
            WRITE(7,*) 'iseed1 = ', iseed1
            WRITE(7,*) 'iseed2 = ', iseed2
@@ -848,11 +941,11 @@
 
            press     = press0
            temp      = temp0
-	   height    = height0
+           height    = height0
            qv        = qv0
            w         = w0
 
-	   ip        = 0
+           ip        = 0
            num_tot   = 0
 
            t         = 0.0
@@ -878,7 +971,7 @@
            ELSE IF (idp .EQ. 2) THEN
 ! -- calculate droplet size distribution using gamma function and number concentration (N_i) and 
 ! -- LWC given in namelist
-              CALL size_dis(N_i,LWC,radius_drop,con_drop,mass_solute,volume,m_i,ne)
+              CALL size_dis(N_i,LWC,rho_a,radius_drop,con_drop,mass_solute,volume,m_i,ne)
               WRITE(7,*) '---------------------------------------------------------------------------'
               WRITE(7,*) ' droplet radius  solute mass     droplet concentration'
               WRITE(7,*) '  (m)             (kg)            (#/domain volume)' 
@@ -970,8 +1063,8 @@
            iteration = 0
 
 ! -- finding environmental temperature and water vapor mixing ratio at cloud base
-           CALL intpol(dt,w,mi,p_array,qv_array,press,qv_e)
-           CALL intpol(dt,w,mi,p_array,temp_array,press,temp_e)
+           CALL intpol(mi,p_array,qv_array,press,qv_e) !dt,w,
+           CALL intpol(mi,p_array,temp_array,press,temp_e) !dt,w,
 
 ! -- write initial microphysical properties
 	   WRITE(94,100) iteration,press0,qv0,temp0,ql0,qt0,w,temp_e,qv_e
@@ -1007,6 +1100,14 @@
                     WRITE(7,*) 'The top of the environmental profile was exceeded. Leaving the code now.'
                     exit
                  END IF
+! -- end simulation when top of incloud vertical velocity profile is reached
+                 IF (ivp .EQ. 1) THEN
+                    IF (press .LT. p_cloud(SIZE(p_cloud))*100.0) THEN
+                       WRITE(7,*) 'The top of the incloud vertical velocity profile was exceeded. '
+                       WRITE(7,*) 'Leaving the code now.'
+                       exit
+                    END IF
+                 END IF
 ! -- set flag for entrainment at cloud base (first time step) to TRUE
                  IF (cb_ent .EQ. 1) THEN
                     ent_flag = .TRUE.
@@ -1014,13 +1115,14 @@
 ! -- interpolate height, mixing ration and temperature to pressure level
 ! -- interpolated value are stored on Z, qv_e and temp_e
                  IF (ivp .EQ. 1) THEN
-	            CALL intpol(time0,w,mi,p_cloud,w_cloud,press,vel)
+	            CALL intpol(nline_v,p_cloud,w_cloud,press,vel) !time0,w,
                     w = vel
                  END IF
-	         CALL intpol(dt,w,mi,p_array,z_array,press,Z)
-                 CALL intpol(dt,w,mi,p_array,qv_array,press,qv_e)
-                 CALL intpol(dt,w,mi,p_array,temp_array,press,temp_e)
- 
+
+	         CALL intpol(mi,p_array,z_array,press,Z) !dt,w,
+                 CALL intpol(mi,p_array,qv_array,press,qv_e) !dt,w,
+                 CALL intpol(mi,p_array,temp_array,press,temp_e) !dt,w,
+
                  IF (t .GE. t_entm) THEN
                     WRITE(7,*) 'iteration = ', iteration
 
@@ -1029,7 +1131,7 @@
 	            time0  = t_entm
 	            t_entm = t_entm + dt_entm
 
- 	            WRITE(74,102) time0, press, Z, qv_e, temp_e, dt_entm
+                    WRITE(73,102) time0, press, Z, qv_e, temp_e, dt_entm
 102                 format(6(2x,e15.6))
 
 ! -- set velocity to zero after first entrainment event to study isobaric mixing 
@@ -1153,8 +1255,8 @@
                           part = NINT((FLOAT(m3(n_blob))-FLOAT(m2(n_blob)))/FLOAT(xn)*10)
 
 ! -- assign the ccn into the portions between m2 and m3
-	                  CALL assigd2(n_drop_used,n_ccn,m2,m3,jcell_pop,dx,m1,x,bl,igrid,idimen,iseed5,n_max, & 
-                               &       n_blob,part,blob_flag)
+	                  CALL assigd2(n_drop_used,n_ccn,m2,m3,jcell_pop,dx,m1,x,igrid,idimen,iseed5,n_max, & 
+                               &       n_blob,part,blob_flag,ngrid)
                        ELSE IF (iccn .EQ. 2) THEN
 ! -- entrained air contains droplets / ccn
 ! -- read information about entrained ccns from file
@@ -1224,8 +1326,8 @@
                           part = NINT((FLOAT(m3(n_blob))-FLOAT(m2(n_blob)))/FLOAT(xn)*10)
 
 ! -- assign the ccn into the portions between m2 and m3
-	                  CALL assigd2(n_drop_used,n_ccn,m2,m3,jcell_pop,dx,m1,x,bl,igrid,idimen,iseed5,n_max, & 
-                               &       n_blob,part,blob_flag)
+	                  CALL assigd2(n_drop_used,n_ccn,m2,m3,jcell_pop,dx,m1,x,igrid,idimen,iseed5,n_max, & 
+                               &       n_blob,part,blob_flag,ngrid)
                        ELSE
                           WRITE(7,*) ''
                           WRITE(7,*) 'iccn has to be either 0,1 or 2! Check namelist!'
@@ -1279,7 +1381,35 @@
                     END DO
 
 ! -- write out the initial info for the run
-                    IF (iteration .EQ. 0) THEN
+!                    IF (iteration .EQ. 0) THEN
+!                       WRITE(63,*) run_info
+!                       WRITE(63,*) ngrid, dx 
+!                       WRITE(63,*) iteration*dt
+!                       WRITE(63,*) (A(i,1), i=1,ngrid)
+!
+!                       WRITE(64,*) run_info
+!                       WRITE(64,*) ngrid, dx 
+!                       WRITE(64,*) iteration*dt
+!                       WRITE(64,*) (A(i,2), i=1,ngrid)
+!                    END IF
+
+! -- flag is set to zero to set the I.C.s and B.C.s in the drop_map subroutine
+                    flag = 0
+                 END IF
+
+                 IF (iteration .EQ. 0) THEN
+                    DO i=1,n_drop
+                       r_time(index_drop(i)) = dsize(i)
+                       x_time(index_drop(i)) = x(i)
+                    END DO
+
+                    IF (output_format .EQ. 1) THEN
+                       WRITE(61,*) iteration*dt
+                       WRITE(61,*) (r_time(i), i=1,m_index)
+ 
+                       WRITE(62,*) iteration*dt
+                       WRITE(62,*) (x_time(i), i=1,m_index)
+                      
                        WRITE(63,*) run_info
                        WRITE(63,*) ngrid, dx 
                        WRITE(63,*) iteration*dt
@@ -1289,14 +1419,34 @@
                        WRITE(64,*) ngrid, dx 
                        WRITE(64,*) iteration*dt
                        WRITE(64,*) (A(i,2), i=1,ngrid)
+                    ELSE IF (output_format .EQ. 2) THEN
+                       WRITE(61) iteration*dt
+                       WRITE(61) (r_time(i), i=1,m_index)
+
+                       WRITE(62) iteration*dt
+                       WRITE(62) (x_time(i), i=1,m_index)
+
+                       WRITE(63) run_info
+                       WRITE(63) ngrid, dx 
+                       WRITE(63) iteration*dt
+                       WRITE(63) (A(i,1), i=1,ngrid)
+
+                       WRITE(64) run_info
+                       WRITE(64) ngrid, dx 
+                       WRITE(64) iteration*dt
+                       WRITE(64) (A(i,2), i=1,ngrid)
+                    ELSE IF (output_format .EQ. 3) THEN
+                       ip = iteration/iteration1
+                       DO i=m1,m4
+                          qv_out(i)   = A(i,1)
+                          temp_out(i) = A(i,2)
+                       END DO
+                       !CALL netcdf_write(r_time,x_time,qv_out,temp_out,m_index,ngrid,ip, &
+                       !                  varid_r,varid_x,varid_qv,varid_temp,ncid)
                     END IF
 
-! -- flag is set to zero to set the I.C.s and B.C.s in the drop_map subroutine
-                    flag = 0
-                 END IF
-
-                 IF (iteration .EQ. 0) THEN
-                    CALL radius_pdf(n_drop,r_pdf_min,r_pdf_max,r_pdf_nbin,dsize,mean_r,mean_r2,mean_r3,r_pdf,r_scalar)
+                    CALL radius_pdf(n_drop,r_pdf_min,r_pdf_max,r_pdf_nbin,dsize, &
+                                    mean_r,mean_r2,mean_r3,r_pdf,r_scalar)
                     WRITE(82,*) mean_r
                     WRITE(83,*) mean_r2
                     WRITE(84,*) mean_r3
@@ -1313,6 +1463,32 @@
  	            CALL qt_prob(m1,m4,qt_pdf_min,qt_pdf_max,qt,qt_pdf,qt_scalar,igrid,qt_pdf_nbin)
 	            WRITE(71,*) qt_scalar
 	            WRITE(71,*) qt_pdf
+
+! -- calculate supersaturation based on droplets
+                    s_sum     = 0.0
+                    s_std_sum = 0.0
+
+                    DO i=m1,m4
+                       es       = EW(A(i,2))*100.0
+                       qs       = eps*es/(press-es)
+                       SuS(i)   = A(i,1)/qs-1.0
+                    END DO
+
+                    DO i=1,n_drop
+                       j_cell = INT(x(i)/dx)+m1
+                       s_sum  = s_sum+SuS(j_cell)
+                    END DO
+
+                    s_sum   = s_sum/FLOAT(n_drop)
+
+                    DO i=1,n_drop
+                       j_cell    = INT(x(i)/dx)+m1
+                       s_std_sum = s_std_sum+(SuS(j_cell)-s_sum)**2.0
+                    END DO
+
+                    s_std_sum  = ((s_std_sum/FLOAT(n_drop))**0.5)
+                    WRITE(87,106) t, s_sum, s_std_sum
+
                  END IF
 
 	         iteration = iteration + 1
@@ -1472,7 +1648,7 @@
 
 ! -- call DGM for each drop
                        CALL dgm(radius,A(j_cell,1),A(j_cell,2),SuS(j_cell),press,w,height,qwater(i),&
-                             &  csize(i),i_grid_vol,dt,iteration,iteration1,aero)
+                             &  csize(i),i_grid_vol,dt,iteration,aero)
 
                        dsize(i)        = radius
 	               qlwater(j_cell) = qlwater(j_cell)+qwater(i)
@@ -1486,9 +1662,8 @@
                        &    ( t .GE. start_t                 ) .AND. &
                        &    ( t .LE. end_t                   ) &
                        &  ) THEN
-                          t_ip                       = (iteration-iteration_s)/iteration3
-                          r_time(index_drop(i),t_ip) = radius*1.e6
-                          x_time(index_drop(i),t_ip) = x(i)
+                          r_time(index_drop(i)) = radius*1.e6
+                          x_time(index_drop(i)) = x(i)
                           time_null(index_drop(i))   = 1.0
 
                        END IF
@@ -1500,12 +1675,10 @@
                  &    ( t .GE. start_t                 ) .AND. &
                  &    ( t .LE. end_t                   ) &
                  &  ) THEN
-                    t_ip          = (iteration-iteration_s)/iteration3
- 	            t_index(t_ip) = n_drop_index
 	            DO i = 1, m_index
 	               IF (time_null(i) .EQ. 0.0) THEN
-	                  r_time(i,t_ip) = 0.0
-	                  x_time(i,t_ip) = 0.0
+	                  r_time(i) = 0.0
+	                  x_time(i) = 0.0
 	               END IF
 	            END DO
                  END IF
@@ -1557,64 +1730,18 @@
 
                  t = dt*iteration
 
-	         IF (mod(iteration,iteration1) .EQ. 0.) THEN
-! -- calculate supersaturation and its pdf
-                    DO i=m1,m4
-                       es       = EW(A(i,2))*100.0
-                       qs       = eps*es/(press-es)
-                       SuS(i)   = A(i,1)/qs-1.0
-                    END DO
-
-	            s_max = -0.99
-	            s_min = +0.1
-	            CALL max_min(s_max,s_min,SuS,m1,m4,igrid)
-
-	            s_diff     = s_max-s_min
-
-	            WRITE(88,*) s_max, s_min, s_diff
-
-	            WRITE(94,100) iteration,press,qv_ave,temp_ave,ql_ave,qv_ave+ql_ave,w,temp_e,qv_e
-
-	            r_max_drop = 0.0
-	            ip         = iteration/iteration1
-
-                    CALL rmax(r_max_drop,dsize,n_drop,index_r_max)
-
-	            r_max(ip)       = r_max_drop
-	            r_max_index(ip) = index_drop(index_r_max)
-
-! -- calculate mean radius, mean r^2 and mean r^3 
-                    CALL radius_pdf(n_drop,r_pdf_min,r_pdf_max,r_pdf_nbin,dsize,mean_r,mean_r2,mean_r3,r_pdf,r_scalar)
-                    WRITE(82,*) mean_r
-                    WRITE(83,*) mean_r2
-                    WRITE(84,*) mean_r3
-                    WRITE(85,*) r_pdf
-
-                    CALL eff_radius(n_drop,r_pdf_nbin,mean_r2,mean_r3,r_pdf,eff_r)
-                    WRITE(86,*) t, Z, eff_r
-
-! -- calculate pdf of total water
- 	            DO i=m1,m4
-  	               qt(i) = A(i,1)+qlwater(i)
- 	            END DO
-
- 	            CALL qt_prob(m1,m4,qt_pdf_min,qt_pdf_max,qt,qt_pdf,qt_scalar,igrid,qt_pdf_nbin)
-
-	            WRITE(71,*) qt_pdf
-	         END IF
-
 ! -- specified time to record data
-                 IF ( (MOD(iteration,iteration3) .EQ. 0) .AND. &
-                    & ( t .GE. start_t                 ) .AND. &
-                    & ( t .LE. end_t                   ) &
-                    & ) THEN
+!                 IF ( (MOD(iteration,iteration3) .EQ. 0) .AND. &
+!                    & ( t .GE. start_t                 ) .AND. &
+!                    & ( t .LE. end_t                   ) &
+!                    & ) THEN
 
 ! -- write out field data
-                    WRITE(63,*) t                            ! time
-                    WRITE(63,*) (A(i,1),i=1,ngrid)
-                    WRITE(64,*) t                            ! time
-                    WRITE(64,*) (A(i,2),i=1,ngrid)
-                 END IF
+!                    WRITE(63,*) t                            ! time
+!                    WRITE(63,*) (A(i,1),i=1,ngrid)
+!                    WRITE(64,*) t                            ! time
+!                    WRITE(64,*) (A(i,2),i=1,ngrid)
+!                 END IF
 
 ! -- calculate virtual potential temperature for the environment
                  pt_e   = temp_e*(100000/press)**(Rd/cp)
@@ -1646,22 +1773,23 @@
 
 ! -- using height to find the end of the simulation
                  IF (cloudtopheight .GT. 0.0) THEN
-	            IF (Z .GT. cloudtopheight) THEN
+                    IF (Z .GT. cloudtopheight) THEN
                        WRITE(7,*) 'Cloud top height is reached. Leaving the code now.'
                        exit
                     END IF
-	         END IF
+                 END IF
 
 ! -- cloud completely evaporates (ql drops below zero)
-	         IF (ql .LT. 0.0) THEN
+                 IF (ql .LT. 0.0) THEN
                     WRITE(7,*) 'Cloud completely evaporated. Leaving the code now.'
                     exit
-	         END IF
-! -- ending simulation when vertical velocity is zero (and according flag is set)
+                 END IF
+! -- ending simulation when vertical velocity is smaller than threshold value set in namelist
+! -- (and according flag is set)
                  IF (icaw .EQ. 1) THEN
-                    IF (w .LT. 0.0) THEN
-                       WRITE(7,*) 'Vertical velocity is negative. According to flag set in namelist'
-                       WRITE(7,*) '(icaw=1) EMPM stops.'
+                    IF (w .LT. thsw) THEN
+                       WRITE(7,*) 'Vertical velocity is smaller than threshold ', thsw, '.'
+                       WRITE(7,*) 'According to flag set in namelist (icaw=1) EMPM stops.'
                        exit
                     END IF
                  END IF
@@ -1669,8 +1797,98 @@
                  IF (mod(iteration,iteration1) .EQ. 0) exit
               END DO
 
+!              IF (mod(iteration,iteration1) .EQ. 0.) THEN
+! -- write out history data of droplet radius and locations
+              IF (output_format .EQ. 1) THEN
+                 WRITE(61,*) t
+                 WRITE(61,*) (r_time(i), i=1,m_index)
+
+                 WRITE(62,*) t
+                 WRITE(62,*) (x_time(i), i=1,m_index)
+
+                 WRITE(63,*) run_info
+                 WRITE(63,*) ngrid, dx 
+                 WRITE(63,*) iteration*dt
+                 WRITE(63,*) (A(i,1), i=1,ngrid)
+
+                 WRITE(64,*) run_info
+                 WRITE(64,*) ngrid, dx 
+                 WRITE(64,*) iteration*dt
+                 WRITE(64,*) (A(i,2), i=1,ngrid)
+              ELSE IF (output_format .EQ. 2) THEN
+                 WRITE(61) t
+                 WRITE(61) (r_time(i), i=1,m_index)
+
+                 WRITE(62) t
+                 WRITE(62) (x_time(i), i=1,m_index)
+
+                 WRITE(63) run_info
+                 WRITE(63) ngrid, dx 
+                 WRITE(63) iteration*dt
+                 WRITE(63) (A(i,1), i=1,ngrid)
+
+                 WRITE(64) run_info
+                 WRITE(64) ngrid, dx 
+                 WRITE(64) iteration*dt
+                 WRITE(64) (A(i,2), i=1,ngrid)
+              ELSE IF (output_format .EQ. 3) THEN
+                 ip = iteration/iteration1 
+
+                 DO i=m1,m4
+                    qv_out(i)   = A(i,1)
+                    temp_out(i) = A(i,2)
+                 END DO
+                 CALL netcdf_write(r_time,x_time,qv_out,temp_out,m_index,ngrid,ip, &
+                                   varid_r,varid_x,varid_qv,varid_temp,ncid)
+                    
+              END IF
+! -- calculate supersaturation and its pdf
+              DO i=m1,m4
+                 es       = EW(A(i,2))*100.0
+                 qs       = eps*es/(press-es)
+                 SuS(i)   = A(i,1)/qs-1.0
+              END DO
+
+              s_max = -0.99
+              s_min = +0.1
+              CALL max_min(s_max,s_min,SuS,m1,m4,igrid)
+
+              s_diff     = s_max-s_min
+
+              WRITE(88,*) s_max, s_min, s_diff
+
+              WRITE(94,100) iteration,press,qv_ave,temp_ave,ql_ave,qv_ave+ql_ave,w,temp_e,qv_e
+
+              r_max_drop = 0.0
+              ip         = iteration/iteration1
+
+              CALL rmax(r_max_drop,dsize,n_drop,index_r_max)
+
+              r_max(ip)       = r_max_drop
+              r_max_index(ip) = index_drop(index_r_max)
+
+! -- calculate mean radius, mean r^2 and mean r^3 
+              CALL radius_pdf(n_drop,r_pdf_min,r_pdf_max,r_pdf_nbin,dsize,mean_r,mean_r2,mean_r3,r_pdf,r_scalar)
+              WRITE(82,*) mean_r
+              WRITE(83,*) mean_r2
+              WRITE(84,*) mean_r3
+              WRITE(85,*) r_pdf
+
+              CALL eff_radius(n_drop,r_pdf_nbin,mean_r2,mean_r3,r_pdf,eff_r)
+              WRITE(86,*) t, Z, eff_r
+
+! -- calculate pdf of total water
+              DO i=m1,m4
+                 qt(i) = A(i,1)+qlwater(i)
+              END DO
+
+              CALL qt_prob(m1,m4,qt_pdf_min,qt_pdf_max,qt,qt_pdf,qt_scalar,igrid,qt_pdf_nbin)
+
+              WRITE(71,*) qt_pdf
+!                END IF
+
 ! -- current number of iteration periods in one realization
-	      ip = INT(iteration/iteration1)
+              ip = INT(iteration/iteration1)
               WRITE(7,*) 'iperiod = ', ip
 
               r_sum      = 0.0
@@ -1716,28 +1934,28 @@
 ! -------------------------------------------------------------------------------------------------
 
 ! -- separate scalar A(i,1) to SA1(i); and A(i,2) to SA2(i)
-	      DO i=m1,m4 
-	         SA1(i) = A(i,1)
-	         SA2(i) = A(i,2)
-	      END DO
+              DO i=m1,m4 
+                 SA1(i) = A(i,1)
+                 SA2(i) = A(i,2)
+              END DO
 
 ! -- calculate the probability density function of the scalars SA1 and SA2
 ! -- The number of bins is set in namelist
-	      CALL prob(m1,m4,qv_pdf_min,qv_pdf_max,SA1,SA1_PDF,SA1_scalar,scalar_pdf_nbin,ip,mip,igrid)
-	      CALL prob(m1,m4,temp_pdf_min,temp_pdf_max,SA2,SA2_PDF,SA2_scalar,scalar_pdf_nbin,ip,mip,igrid)
+              CALL prob(m1,m4,qv_pdf_min,qv_pdf_max,SA1,SA1_PDF,SA1_scalar,scalar_pdf_nbin,ip,mip,igrid)
+              CALL prob(m1,m4,temp_pdf_min,temp_pdf_max,SA2,SA2_PDF,SA2_scalar,scalar_pdf_nbin,ip,mip,igrid)
 
 ! -- calculate the average of the SA1_PDF and SA2_PDF of differnt realizations
               CALL average(SA1_PDF_ave,SA1_PDF,scalar_pdf_nbin,ip,mreal,mip)
               CALL average(SA2_PDF_ave,SA2_PDF,scalar_pdf_nbin,ip,mreal,mip)
 
 ! -- other statistical calculations (moist static energy, liquid water static energy)
-	      DO i=m1,m4
-	         qt(i)   = SA1(i)+qlwater(i)
+              DO i=m1,m4
+                 qt(i)   = SA1(i)+qlwater(i)
                  sl(i)   = cp*SA2(i)+g*height-Lv_c*qlwater(i)
-	         hm(i)   = cp*SA2(i)+g*height+Lv_c*SA1(i)
-	      END DO
+                 hm(i)   = cp*SA2(i)+g*height+Lv_c*SA1(i)
+              END DO
 
-	      DO i=m1,m4
+              DO i=m1,m4
                  scalar(1,i) = qlwater(i)
                  scalar(2,i) = qt(i)
                  scalar(3,i) = sl(i)
@@ -1749,14 +1967,15 @@
               END DO
 
 ! -- calculate mean and root mean quare of scalars
-	      CALL mean_rms(m1,m4,scalar,scalar_mean,scalar_rms,ip,mip,igrid)
+              CALL mean_rms(m1,m4,scalar,scalar_mean,scalar_rms,ip,mip,igrid)
 
 ! -- average mean and rms of different realizations
               CALL average_2(scalar_mean_ave,scalar_mean,ip,mreal,mip)
               CALL average_2(scalar_rms_ave,scalar_rms,ip,mreal,mip)
 
-! -- calculate the probability density function of SuS. 
-              CALL prob(m1,m4,Sus_pdf_min,Sus_pdf_max,scalar(6,:),SuS_pdf,SuS_scalar,scalar_pdf_nbin,ip,mip,igrid)
+! -- calculate the probability density function of SuS
+              dummy_SuS(:) = scalar(6,:)
+              CALL prob(m1,m4,Sus_pdf_min,Sus_pdf_max,dummy_SuS,SuS_pdf,SuS_scalar,scalar_pdf_nbin,ip,mip,igrid)
 
 ! -- calculate the average of the SA1_PDF and SA2_PDF of differnt realizations
               CALL average(SuS_pdf_ave,SuS_pdf,scalar_pdf_nbin,ip,mreal,mip)
@@ -1773,42 +1992,40 @@
 ! -- cloud completely evaporates (ql drops below zero)
               IF (ql .LT. 0.0) exit
 
-! -- ending simulation when vertical velocity is zero (and according flag is set)
-                 IF (icaw .EQ. 1) THEN
-                    IF (w .LT. 0.0) exit
+! -- ending simulation when vertical velocity is smaller than threshold value set in namelist
+! -- (and according flag is set)
+              IF (icaw .EQ. 1) THEN
+                 IF (w .LT. thsw) exit
+              END IF
+
+! -- ending simulation when top of incloud vertical velocity profile is reached
+              IF (ivp .EQ. 1) THEN
+                 IF (press .LT. p_cloud(SIZE(p_cloud))*100.0) THEN
+                    exit
                  END IF
+              END IF
 
               IF (iteration .GE. iteration2) exit
            END DO
 
-	   ipreal = INT(iteration/iteration1)
+           ipreal = INT(iteration/iteration1)
            WRITE(7,*) '---------------------------------------------------------------------------'
-	   WRITE(7,*) 'ipreal = ', ipreal
+           WRITE(7,*) 'ipreal = ', ipreal
            WRITE(7,*) '---------------------------------------------------------------------------'
 
            DO j=1,ipreal
 ! -- scalar_pdf_nbin is the bin number for PDF
 ! -- Note that the array "j" in PDFave(j,k) is the iteration periods in each realization
-	      IF (j .EQ. 1) THEN
-	         WRITE(92,*) SA1_scalar
-	         WRITE(93,*) SA2_scalar
-	      END IF
+              IF (j .EQ. 1) THEN
+                 WRITE(92,*) SA1_scalar
+                 WRITE(93,*) SA2_scalar
+              END IF
               WRITE(92,*) (SA1_PDF_ave(j,k),k=1,scalar_pdf_nbin)
               WRITE(93,*) (SA2_PDF_ave(j,k),k=1,scalar_pdf_nbin)
            END DO
-
-! -- write out the history data of droplet radius and locations 
-           DO ip=1,hist_array
-              t_time = (ip-1)*dt*iteration3+start_t
-	      WRITE(61,*) t_time
-	      WRITE(61,*) (r_time(i,ip),i=1,m_index)
-	      WRITE(62,*) t_time
-	      WRITE(62,*) (x_time(i,ip),i=1,m_index)
-	      WRITE(73,*) t_index(ip)
-	   END DO
-
-	   DO ip=1,ipreal
-	      t = ip*dt*iteration1 
+ 
+           DO ip=1,ipreal
+              t = ip*dt*iteration1 
               WRITE(91,107) t, scalar_mean_ave(1,ip), scalar_rms_ave(1,ip), &
                     &       scalar_mean_ave(2,ip), scalar_rms_ave(2,ip),    &
                     &       scalar_mean_ave(3,ip), scalar_rms_ave(3,ip),    &
@@ -1818,12 +2035,12 @@
                     &       scalar_mean_ave(7,ip), scalar_rms_ave(7,ip),    &
                     &       scalar_mean_ave(8,ip), scalar_rms_ave(8,ip),    &
                     &       r_mean(ip), r_std(ip), actndrop(ip), r_max(ip), r_max_index(ip)
-	   END DO
+           END DO
 107        format(19(1x,e14.6),1x,1i10,1x,e14.6,1x,1i10)
 
-	   DO i=1,n_drop
-	      WRITE(72,108) i,index_drop(i),dsize(i)*1.e6
-	   END DO
+           DO i=1,n_drop
+             WRITE(72,108) i,index_drop(i),dsize(i)*1.e6
+           END DO
 108        format(2(1x,i6),1x,e12.4)
 
            DO j=1,ipreal
@@ -1836,22 +2053,25 @@
               WRITE(95,*) (SuS_pdf_ave(j,k),k=1,scalar_pdf_nbin)
            END DO
 
-	   WRITE(94,100) iteration,press,qv_ave,temp_ave,ql/FLOAT(ngrid),qv_ave+ql/FLOAT(ngrid),w,temp_e,qv_e
+           WRITE(94,100) iteration,press,qv_ave,temp_ave,ql/FLOAT(ngrid),qv_ave+ql/FLOAT(ngrid),w,temp_e,qv_e
 
            WRITE(96,*) LWP/(count_LWP*dt)
 
 ! -- initialize the iteration in order to perform another realization
            iteration = 0
 
-           CLOSE(unit=61)
-           CLOSE(unit=62)
+           IF (output_format .EQ. 1 .OR. output_format .EQ. 2) THEN
+              CLOSE(unit=61)
+              CLOSE(unit=62)
+           ELSE IF (output_format .EQ. 3) THEN
+              CALL check( NF90_CLOSE(ncid) ) 
+           END IF
            CLOSE(unit=63)
-	   CLOSE(unit=64)
+           CLOSE(unit=64)
 
-	   CLOSE(unit=71)
-	   CLOSE(unit=72)
-	   CLOSE(unit=73)
-	   CLOSE(unit=74)
+           CLOSE(unit=71)
+           CLOSE(unit=72)
+           CLOSE(unit=73)
 
            CLOSE(unit=81)
            CLOSE(unit=82)
@@ -1862,11 +2082,11 @@
            CLOSE(unit=87)
            CLOSE(unit=88)
 
-	   CLOSE(unit=91)
-	   CLOSE(unit=92)
-	   CLOSE(unit=93)
-	   CLOSE(unit=94)
-	   CLOSE(unit=95)
+           CLOSE(unit=91)
+           CLOSE(unit=92)
+           CLOSE(unit=93)
+           CLOSE(unit=94)
+           CLOSE(unit=95)
            CLOSE(unit=96)
 
 ! -- continue with another realization
@@ -1877,9 +2097,9 @@
         WRITE(7,*) '---------------------------------------------------------------------------'
         WRITE(7,*) '---------------------------------------------------------------------------'
 
-	time_end = time()
-	WRITE(7,*) 'elpased time in min. ', (time_end - time_start)/60.
+        time_end = time()
+        WRITE(7,*) 'elpased time in min. ', (time_end - time_start)/60.
 
-	CLOSE(7)
+        CLOSE(7)
 
-	END
+        END

@@ -23,7 +23,7 @@
 ! universal gas constant (R_uni)
         REAL*8, PARAMETER :: R_uni = 8.1344598
 ! molecular weight of air (Md) and of water (Mw)
-        REAL*8, PARAMETER :: Md = 28.96535E-3
+        REAL*8, PARAMETER :: Md = 28.96535!E-3
         REAL*8, PARAMETER :: Mw = 18.01528
 
         REAL*8, PARAMETER :: eps = 0.622, epstv = 0.608 

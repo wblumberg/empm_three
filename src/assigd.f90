@@ -91,6 +91,10 @@
 ! Updates:
 ! --------
 !
+! July 19th, 2016
+! -- change variable type for RAND1 to REAL*8 - fixed bug related to determination of indices of 
+! -- droplet
+!
 ! January 25th, 2016
 ! -- the old FORTRAN77 code was rewritten in FORTRAN90
 ! -- full control over code was gained by declaring each variable
@@ -99,8 +103,8 @@
 ! -------------------------------------------------------------------------------------------------
 ! -------------------------------------------------------------------------------------------------
 
-	SUBROUTINE assigd2(ndrop_used,nccn,m2,m3,jcell_pop,dx,m1,x,BL,igrid,idimen,iseed5,n_max, &
-                   &       n_blob,part,blob_flag)
+	SUBROUTINE assigd2(ndrop_used,nccn,m2,m3,jcell_pop,dx,m1,x,igrid,idimen,iseed5,n_max, &
+                   &       n_blob,part,blob_flag,ngrid)
 
         IMPLICIT NONE
 
@@ -112,8 +116,7 @@
         INTEGER   :: ngt3, nis1, nis2, nis3
 	INTEGER*4 :: igrid
 	INTEGER*4 :: iseed5
-        REAL      :: BL
-        REAL      :: RAND1
+        REAL*8    :: RAND1
         REAL*8    :: x(idimen)
 	REAL*8    :: dx, rand_no
 

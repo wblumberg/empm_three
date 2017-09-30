@@ -17,7 +17,7 @@
 
         h      = htry
 
-1       CALL rkck(y,dydx,n,x,h,ytemp,yerr,derivs)
+1       CALL rkck(y,dydx,n,h,ytemp,yerr,derivs)
 
         errmax = 0.0
         DO i=1,n
