@@ -1,5 +1,6 @@
 git add -f Documentation.pdf
 git add -f git_add.sh
+git add -f hash_list.json
 git add -f data/BOMEX_enviro.txt
 git add -f data/cloud_vel.txt
 git add -f data/drop.data.new
