@@ -18,6 +18,9 @@
 !
 ! Updates:
 ! --------
+! Oct 3rd, 2017
+! -- Clean up code and remove left over commented code lines
+!
 ! Sep 28th, 2017
 ! -- Include temptime and qvtime array in netCDF output file when netCDF flag is chosen
 ! -- Include spline interpolation for small droplet radii (contains still a bug)
@@ -1380,19 +1383,6 @@
                        jcell_pop(jcell_pop(0,j-m1+1),j-m1+1) = i
                     END DO
 
-! -- write out the initial info for the run
-!                    IF (iteration .EQ. 0) THEN
-!                       WRITE(63,*) run_info
-!                       WRITE(63,*) ngrid, dx 
-!                       WRITE(63,*) iteration*dt
-!                       WRITE(63,*) (A(i,1), i=1,ngrid)
-!
-!                       WRITE(64,*) run_info
-!                       WRITE(64,*) ngrid, dx 
-!                       WRITE(64,*) iteration*dt
-!                       WRITE(64,*) (A(i,2), i=1,ngrid)
-!                    END IF
-
 ! -- flag is set to zero to set the I.C.s and B.C.s in the drop_map subroutine
                     flag = 0
                  END IF
@@ -1436,11 +1426,12 @@
                        WRITE(64) iteration*dt
                        WRITE(64) (A(i,2), i=1,ngrid)
                     ELSE IF (output_format .EQ. 3) THEN
-                       ip = iteration/iteration1
-                       DO i=m1,m4
-                          qv_out(i)   = A(i,1)
-                          temp_out(i) = A(i,2)
-                       END DO
+! -- Writing netCDF at this point of the simulations leads to netCDF error - to be fixed later
+                       !ip = iteration/iteration1
+                       !DO i=m1,m4
+                       !   qv_out(i)   = A(i,1)
+                       !   temp_out(i) = A(i,2)
+                       !END DO
                        !CALL netcdf_write(r_time,x_time,qv_out,temp_out,m_index,ngrid,ip, &
                        !                  varid_r,varid_x,varid_qv,varid_temp,ncid)
                     END IF
@@ -1729,19 +1720,6 @@
                  END DO
 
                  t = dt*iteration
-
-! -- specified time to record data
-!                 IF ( (MOD(iteration,iteration3) .EQ. 0) .AND. &
-!                    & ( t .GE. start_t                 ) .AND. &
-!                    & ( t .LE. end_t                   ) &
-!                    & ) THEN
-
-! -- write out field data
-!                    WRITE(63,*) t                            ! time
-!                    WRITE(63,*) (A(i,1),i=1,ngrid)
-!                    WRITE(64,*) t                            ! time
-!                    WRITE(64,*) (A(i,2),i=1,ngrid)
-!                 END IF
 
 ! -- calculate virtual potential temperature for the environment
                  pt_e   = temp_e*(100000/press)**(Rd/cp)
