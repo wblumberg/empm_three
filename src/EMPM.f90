@@ -13,11 +13,14 @@
 !
 ! Authors:     Steven Krueger, Phil Austin, Sonja Drueke
 !
-! Date:        SEPTEMBER 2017
+! Date:        OCTOBER 2017
 !
 !
 ! Updates:
 ! --------
+! Oct 5th, 2017
+! -- Fix bug in LWP calculation
+!
 ! Oct 3rd, 2017
 ! -- Clean up code and remove left over commented code lines
 !
@@ -2033,7 +2036,7 @@
 
            WRITE(94,100) iteration,press,qv_ave,temp_ave,ql/FLOAT(ngrid),qv_ave+ql/FLOAT(ngrid),w,temp_e,qv_e
 
-           WRITE(96,*) LWP/(count_LWP*dt)
+           WRITE(96,*) LWP/(count_LWP*dt*bl*0.001)
 
 ! -- initialize the iteration in order to perform another realization
            iteration = 0
