@@ -2036,7 +2036,7 @@
 
            WRITE(94,100) iteration,press,qv_ave,temp_ave,ql/FLOAT(ngrid),qv_ave+ql/FLOAT(ngrid),w,temp_e,qv_e
 
-           WRITE(96,*) LWP/(count_LWP*dt*bl*0.001)
+           WRITE(96,*) LWP
 
 ! -- initialize the iteration in order to perform another realization
            iteration = 0
