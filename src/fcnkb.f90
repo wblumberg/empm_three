@@ -73,6 +73,9 @@
         lalpha = Ktemp*SQRT(2.0*pi*Md*R_uni*temp)/(alpha*press*(cv+R_uni/2.0))
         lbeta  = SQRT(2.0*pi*Mw/(Rv*temp))*D/beta
 
+! -- calculate the aerosol molecular weight, solute composition, and
+! -- constants for the DGM (could extend code to include other aerosol
+! -- types here)
         IF (dmaxa .EQ. 1) THEN 
            Ms = 58.4428e-3
            c7 = c7nacl 
