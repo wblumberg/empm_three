@@ -12,14 +12,17 @@ NAME = EMPM
 #-- in that section.
 #-----------------------------------------------------------------------------
 #   Intel compiler 
-FC   = ifort
-OPTS = -I../include -O3  -xHost -ip -assume byterecl -ftz -r8
+#FC   = ifort
+#OPTS = -I../include -O3  -xHost -ip -assume byterecl -ftz -r8
 #OPTS = -I../include -g -warn all -check all -fpe0 -traceback -debug extended -check uninit
-NC   = -lnetcdf -I$(NETCDF)/include -L/$(NETCDF)/lib
+#NETCDF = /opt/netcdf-fortran-4.4.4
+#NC   = -lnetcdf -I$(NETCDF)/include -L/$(NETCDF)/lib
 #-----------------------------------------------------------------------------
 #   gfortran compiler
-#FC   = gfortran
-#OPTS =  -ffree-form -ffree-line-length-none -O2 -fbounds-check
+FC   = gfortran
+OPTS =  -ffree-form -ffree-line-length-none -O2 -fbounds-check
+NC   =  -lnetcdff -I$(NETCDF)/include -L/$(NETCDF)/lib -lnetcdf -I/opt/netcdf-4.4.1/include -L/opt/netcdf-4.4.1/lib 
+ 
 #-----------------------------------------------------------------------------
 #   g95 compiler - not tested for the moment
 #FC   = g95
@@ -81,7 +84,6 @@ all :empm
 
 empm:			$(OBJS)
 			$(FC)  -o $(NAME) $(OBJS) $(NC)
-
 clean:
 			rm -f *.o *.a *.mod
 
