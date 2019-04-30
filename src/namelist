@@ -75,10 +75,10 @@
     output_format   = 3,
 
     i_profile_path  = '../data/',
-    i_profile_file  = 'BOMEX_environment_36.txt',
+    i_profile_file  = 'environment.txt',
 
     v_profile_path  = '../data/',
-    v_profile_file  = 'BOMEX_incloud_w_36_01.txt',
+    v_profile_file  = 'cloud_vel.txt',
 
     drop_path       = '../data/',
     drop_file       = 'drop.data.new',
