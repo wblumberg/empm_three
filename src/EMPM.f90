@@ -846,7 +846,11 @@
            m_index = NINT(volume*N_i)
         ELSE 
            delta_ent     = (n_blob/ent_rate)*(psigma/(1.0-psigma))
-           cloud_depth   = h_cloud(nline_v)-h_cloud(1)
+           IF ( ivp .EQ. 1) THEN
+               cloud_depth   = h_cloud(nline_v)-h_cloud(1)
+           ELSE
+               cloud_depth   = cloudtopheight - height
+           END IF
 
            number_ent    = cloud_depth/delta_ent
 
