@@ -706,6 +706,7 @@
 
            CLOSE(52)
            w = w_cloud(1)
+           height = h_cloud(1)
         END IF
 
         WRITE(7,*) ''
@@ -716,7 +717,7 @@
         WRITE(7,*) 'press  = ', press, '   ! pressure (Pa)'
         WRITE(7,*) 'w      = ', w, '   ! cloud base vertical velocity (m/s)'
         WRITE(7,*) 'rho    = ', rho_a, '   ! cloud base air density (kg/m^3)'
-        WRITE(7,*) 'height = ', h_cloud(1), '   ! height (m)'
+        WRITE(7,*) 'height = ', height, '   ! height (m)'
         WRITE(7,*) '---------------------------------------------------------------------------'
         WRITE(7,*) ''
 
